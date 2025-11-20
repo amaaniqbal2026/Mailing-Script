@@ -1,0 +1,316 @@
+/******************************
+ * STEP 1: Sheet Preparation
+ ******************************/
+
+function _createMailsHistorySheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var InputsSheet = ss.getSheetByName("Inputs");
+  var MailsHistorySheet = ss.getSheetByName("Mails History");
+
+  // Delete existing sheet if present
+  if (MailsHistorySheet) ss.deleteSheet(MailsHistorySheet);
+  MailsHistorySheet = ss.insertSheet("Mails History");
+
+  // Headers
+  var headers = ["Email Address","Last Mail Check","Date","Time","No. of Mails Sent","Last Mail Label","Current POC"];
+  MailsHistorySheet.getRange(1,1,1,headers.length).setValues([headers])
+                  .setFontWeight("bold").setBackground("yellow").setHorizontalAlignment("center");
+
+  // Fill Email Address and Current POC from Inputs
+  var lastRow = InputsSheet.getLastRow();
+  for (var row = 2; row <= lastRow; row++) {
+    MailsHistorySheet.getRange(row,1).setFormula('=TRIM(Inputs!A' + row + ')');
+  }
+  var pocData = InputsSheet.getRange(2,5,lastRow-1,1).getValues();
+  MailsHistorySheet.getRange(2,7,lastRow-1,1).setValues(pocData);
+
+  // Populate email sending info from Gmail
+  for (var row = 2; row <= lastRow; row++) {
+    var email = MailsHistorySheet.getRange(row,1).getValue();
+    var threads = GmailApp.search('to:' + email);
+    if (threads.length > 0) {
+      var latestMessage = threads[0].getMessages().pop();
+      var date = latestMessage.getDate();
+      MailsHistorySheet.getRange(row,3).setValue(Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd"));
+      MailsHistorySheet.getRange(row,4).setValue(Utilities.formatDate(date, Session.getScriptTimeZone(), "HH:mm:ss"));
+      MailsHistorySheet.getRange(row,5).setValue(threads.length);
+      var labels = threads[0].getLabels().map(l=>l.getName()).join(", ");
+      MailsHistorySheet.getRange(row,6).setValue(labels);
+      MailsHistorySheet.getRange(row,2).setValue("Mail sent");
+    } else {
+      MailsHistorySheet.getRange(row,2).setValue("Mail not sent");
+    }
+  }
+
+  // Conditional formatting for Email not sent
+  var emailRange = MailsHistorySheet.getRange(2,1,lastRow-1,1);
+  var rule = SpreadsheetApp.newConditionalFormatRule()
+              .whenFormulaSatisfied('=$B2="Mail not sent"')
+              .setBackground("red")
+              .setRanges([emailRange])
+              .build();
+  var rules = MailsHistorySheet.getConditionalFormatRules();
+  rules.push(rule);
+  MailsHistorySheet.setConditionalFormatRules(rules);
+
+  // Borders, filter, alignment
+  var dataRange = MailsHistorySheet.getRange(1,1,lastRow,7);
+  dataRange.setBorder(true,true,true,true,true,true);
+  MailsHistorySheet.getRange(1,1,1,7).createFilter();
+  MailsHistorySheet.getRange(2,1,lastRow-1,1).setHorizontalAlignment("left");
+  MailsHistorySheet.getRange(2,2,lastRow-1,6).setHorizontalAlignment("center");
+  Utilities.sleep(5000);
+  MailsHistorySheet.autoResizeColumns(1,7);
+
+  Logger.log("Mails History sheet created. Total emails processed: " + (lastRow-1));
+}
+
+function _createMailsDataSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var InputsSheet = ss.getSheetByName("Inputs");
+  var MailsDataSheet = ss.getSheetByName("Mails Data");
+
+  if (MailsDataSheet) ss.deleteSheet(MailsDataSheet);
+  MailsDataSheet = ss.insertSheet("Mails Data");
+
+  // Updated headers with Company Name and Sender (no optional column)
+  var headers = ["Email Address","Name","Sir/Ma'am/Team","Company Name","POC Label","Sender"];
+  MailsDataSheet.getRange(1,1,1,6).setValues([headers])
+               .setFontWeight("bold").setBackground("yellow")
+               .setHorizontalAlignment("center").setFontFamily("Calibri").setFontSize(11);
+
+  var lastRow = InputsSheet.getLastRow();
+  MailsDataSheet.getRange(2,1,lastRow-1,1).setFormula("=TRIM(Inputs!A2)");
+  MailsDataSheet.getRange(2,2,lastRow-1,1).setFormula("=PROPER(TRIM(Inputs!B2))");
+  MailsDataSheet.getRange(2,3,lastRow-1,1).setFormula("=TRIM(Inputs!C2)");
+  MailsDataSheet.getRange(2,4,lastRow-1,1).setFormula("=TRIM(Inputs!D2)"); // Company Name
+  MailsDataSheet.getRange(2,5,lastRow-1,1).setFormula("=Inputs!E2"); // POC Label name
+  MailsDataSheet.getRange(2,6,lastRow-1,1).setFormula("=TRIM(Inputs!F2)"); // Sender label
+
+  SpreadsheetApp.flush();
+  MailsDataSheet.autoResizeColumns(1,6);
+  MailsDataSheet.getRange(2,1,lastRow-1,6).setFontFamily("Calibri").setFontSize(11);
+
+  // Updated conditional formatting for 6 columns
+  var rule1 = SpreadsheetApp.newConditionalFormatRule()
+               .whenFormulaSatisfied('=AND(C2<>"Sir", C2<>"Ma\'am", C2<>"Team")')
+               .setBackground("#FF0000")
+               .setRanges([MailsDataSheet.getRange(2,3,lastRow-1,1)])
+               .build();
+  var rule2 = SpreadsheetApp.newConditionalFormatRule()
+               .whenFormulaSatisfied('=COUNTIF(A:A,A2)>1')
+               .setBackground("#FF0000")
+               .setRanges([MailsDataSheet.getRange(2,1,lastRow-1,1)])
+               .build();
+  var rule3 = SpreadsheetApp.newConditionalFormatRule()
+               .whenCellEmpty()
+               .setBackground("#FF0000")
+               .setRanges([MailsDataSheet.getRange(2,5,lastRow-1,1)]) // POC Label must not be empty
+               .build();
+  var rules = MailsDataSheet.getConditionalFormatRules();
+  rules.push(rule1, rule2, rule3);
+  MailsDataSheet.setConditionalFormatRules(rules);
+
+  Logger.log("Mails Data sheet created with all formulas and formatting.");
+}
+
+function _changeFontForAllSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  ss.getSheets().forEach(sheet=>{
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+    sheet.getRange(1,1,lastRow,lastCol).setFontFamily("Calibri").setFontSize(11);
+  });
+  Logger.log("Font changed to Calibri size 11 for all sheets.");
+}
+
+function Step1_Mails_History_Data() {
+  _createMailsHistorySheet();
+  _createMailsDataSheet();
+  _changeFontForAllSheets();
+}
+
+/******************************
+ * STEP 2: Send Emails
+ ******************************/
+
+function Send_Mails(batchSize = 250) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var startRow = 2;
+  var numRows = sheet.getLastRow() - 1;
+  var dataRange = sheet.getRange(startRow, 1, numRows, 6);
+  var data = dataRange.getValues();
+  
+  // Add Sent and Bounced headers if not present
+  if (sheet.getRange(1, 7).getValue() !== "Sent") {
+    sheet.getRange(1, 7).setValue("Sent").setFontWeight("bold").setBackground("#FFFF00");
+  }
+  if (sheet.getRange(1, 8).getValue() !== "Bounced") {
+    sheet.getRange(1, 8).setValue("Bounced").setFontWeight("bold").setBackground("#FFFF00");
+  }
+
+  for (var j = 0; j < data.length && j < batchSize; j++) {
+    var row = data[j];
+    var emailAddress = row[0];
+    var recipientName = row[1];
+    var salutation = row[2];
+    var companyName = row[3];
+    var labelName = row[4];
+    var senderLabelName = row[5];
+    
+    try {
+      // Find the Gmail label for template
+      var label = GmailApp.getUserLabelByName(labelName);
+      if (!label) {
+        Logger.log("Label not found: " + labelName);
+        sheet.getRange(startRow + j, 7).setValue("Error: Label not found");
+        continue;
+      }
+      
+      // Find ALL drafts in Gmail and check which ones have our label
+      var allDrafts = GmailApp.getDrafts();
+      var draft = null;
+      
+      for (var i = 0; i < allDrafts.length; i++) {
+        var currentDraft = allDrafts[i];
+        var draftThread = currentDraft.getMessage().getThread();
+        var threadLabels = draftThread.getLabels();
+        
+        // Check if this draft's thread has our target label
+        for (var k = 0; k < threadLabels.length; k++) {
+          if (threadLabels[k].getName() === labelName) {
+            draft = currentDraft;
+            break;
+          }
+        }
+        if (draft) break;
+      }
+      
+      if (!draft) {
+        Logger.log("No draft found with label: " + labelName);
+        sheet.getRange(startRow + j, 7).setValue("Error: No draft with label");
+        continue;
+      }
+      
+      var message = draft.getMessage();
+      var body = message.getBody();
+      var attachments = message.getAttachments();
+      var subjectTemplate = message.getSubject();
+      
+      // Replace placeholders in body and subject
+      var personalizedBody = body.replace(/{{name}}/g, recipientName || "")
+                                .replace(/{{salutation}}/g, salutation);
+      var personalizedSubject = subjectTemplate.replace(/{{Company Name}}/g, companyName);
+      
+      // Store the sent email thread reference
+      var sentThread = null;
+      
+      // Send email and capture the thread
+      GmailApp.sendEmail(emailAddress, personalizedSubject, '', {
+        htmlBody: personalizedBody,
+        attachments: attachments
+      });
+      
+      // IMPORTANT: Wait a moment for Gmail to process the sent email
+      Utilities.sleep(2000);
+      
+      // Apply sender label if specified - FIXED SEARCH
+      if (senderLabelName && senderLabelName !== "") {
+        var senderLabel = GmailApp.getUserLabelByName(senderLabelName) || GmailApp.createLabel(senderLabelName);
+        
+        // Search for the sent email more reliably
+        var searchQuery = 'to:' + emailAddress + ' subject:"' + personalizedSubject + '"';
+        Logger.log("Searching for sent email with query: " + searchQuery);
+        
+        var threads = GmailApp.search(searchQuery);
+        
+        // If not found, try a broader search
+        if (threads.length === 0) {
+          threads = GmailApp.search('to:' + emailAddress + ' newer_than:1h');
+          Logger.log("Broad search found " + threads.length + " threads");
+        }
+        
+        if (threads.length > 0) {
+          // Find the most recent thread that matches
+          var latestThread = threads[0];
+          for (var t = 1; t < threads.length; t++) {
+            if (threads[t].getLastMessageDate() > latestThread.getLastMessageDate()) {
+              latestThread = threads[t];
+            }
+          }
+          
+          latestThread.addLabel(senderLabel);
+          Logger.log("Successfully applied sender label: " + senderLabelName + " to email sent to: " + emailAddress);
+        } else {
+          Logger.log("Could not find sent email to apply label for: " + emailAddress);
+        }
+      }
+      
+      // Mark as sent
+      sheet.getRange(startRow + j, 7).setValue("Sent");
+      Logger.log("Successfully sent to: " + emailAddress);
+      
+    } catch(e) {
+      Logger.log("Error sending to " + emailAddress + ": " + e.message);
+      sheet.getRange(startRow + j, 7).setValue("Error: " + e.message);
+    }
+    
+    // Small delay to avoid rate limits
+    if (j < data.length - 1 && j < batchSize - 1) {
+      Utilities.sleep(2000);
+    }
+  }
+
+  Utilities.sleep(20000); // Wait 20 sec for bounce detection
+
+  // Bounce check
+  var bounceThreads = GmailApp.search('from:mailer-daemon@googlemail.com after:' + Math.floor((new Date().getTime()-5*60*1000)/1000));
+  for (var i = 0; i < data.length && i < batchSize; i++) {
+    var emailAddress = data[i][0];
+    var bounced = false;
+    
+    for (var j = 0; j < bounceThreads.length; j++) {
+      var messages = bounceThreads[j].getMessages();
+      for (var k = 0; k < messages.length; k++) {
+        if (messages[k].getTo && messages[k].getTo().includes(emailAddress)) {
+          bounced = true;
+          break;
+        }
+      }
+      if (bounced) break;
+    }
+    
+    if (bounced) {
+      sheet.getRange(startRow + i, 8).setValue("Yes");
+    }
+  }
+
+  Logger.log("Email batch process completed. Processed: " + Math.min(data.length, batchSize) + " emails");
+}
+
+/******************************
+ * SETUP INSTRUCTIONS
+ ******************************/
+
+function setupInstructions() {
+  var ui = SpreadsheetApp.getUi();
+  ui.alert(
+    'Setup Instructions',
+    '1. Update your Inputs sheet with these columns:\n' +
+    '   A: Email Address\n' +
+    '   B: Name\n' +
+    '   C: Sir/Ma\'am/Team\n' +
+    '   D: Company Name\n' +
+    '   E: POC Label (Gmail label name for template)\n' +
+    '   F: Sender (Gmail label to apply after sending)\n\n' +
+    '2. In Gmail:\n' +
+    '   - Create labels for each email type (POC Label)\n' +
+    '   - Save one draft per label\n' +
+    '   - Use {{Company Name}} in draft subject\n' +
+    '   - Use {{name}} and {{salutation}} in draft body\n' +
+    '   - Create sender labels for organization\n\n' +
+    '3. Run Step1_Mails_History_Data() first\n' +
+    '4. Then run Send_Mails()',
+    ui.ButtonSet.OK
+  );
+}
