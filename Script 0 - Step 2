@@ -1,0 +1,138 @@
+function Send_Mails(batchSize = 250) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var startRow = 2;  // Start after the header row
+  var numRows = sheet.getLastRow() - 1; // Number of rows with data
+  
+  // Get email data from the sheet (Columns: Email, Name, Salutation, Subject, DraftName)
+  var dataRange = sheet.getRange(startRow, 1, numRows, 5); // Columns: Email, Name, Salutation, Subject, DraftName
+  var data = dataRange.getValues();
+  
+  // Get all drafts
+  var drafts = GmailApp.getDrafts();
+  
+  Logger.log("Starting email batch process. Batch size: " + batchSize);
+
+  // Loop through the email data in batches
+  for (var j = 0; j < data.length && j < batchSize; j++) {
+    var row = data[j];
+    var emailAddress = row[0];  // Column A: Email Address
+    var recipientName = row[1]; // Column B: Recipient's Name
+    var salutation = row[2];    // Column C: Salutation (Sir/Ma'am/Team)
+    var personalizedSubject = row[3]; // Column D: Subject
+    var draftName = row[4];     // Column E: Draft Name
+
+    Logger.log("Processing row " + (j+1) + " for email: " + emailAddress + " using draft: " + draftName);
+
+    // Find the correct draft based on the draft name from Column E
+    var foundDraft = null;
+    for (var i = 0; i < drafts.length; i++) {
+      var draft = drafts[i];
+      if (draft.getMessage().getSubject() === draftName) {
+        foundDraft = draft;  // store the draft object
+        Logger.log("Found draft for subject: " + draftName);
+        break;
+      }
+    }
+
+    if (!foundDraft) {
+      Logger.log("Draft with subject '" + draftName + "' not found.");
+      continue; // Skip this row if no draft is found
+    }
+
+    // Get the message from the draft and its body
+    var message = foundDraft.getMessage();
+    var body = message.getBody();
+    var attachments = message.getAttachments(); // Get the attachments from the draft
+
+    // Replace the {{name}} and {{salutation}} placeholders in the body
+    var personalizedBody = body.replace("{{name}}", recipientName || "");  // Replace {{name}} or empty string if no name
+    personalizedBody = personalizedBody.replace("{{salutation}}", salutation);  // Replace {{salutation}} with actual salutation
+
+    // Send the email with the correct parameters (HTML body and attachments)
+    try {
+      var sentEmail = GmailApp.sendEmail(emailAddress, personalizedSubject, '', {
+        htmlBody: personalizedBody, // Personalized HTML content
+        attachments: attachments // Attachments from the draft
+      });
+      
+      Logger.log("Email sent to: " + emailAddress + " with subject: " + personalizedSubject);
+      
+      // Now apply the label to the sent email
+      var label = GmailApp.getUserLabelByName(draftName);  // Check if the label exists
+      if (!label) {
+        label = GmailApp.createLabel(draftName);  // Create the label if it doesn't exist
+        Logger.log("Label '" + draftName + "' created.");
+      }
+      
+      // Apply the label to the sent email
+      var threads = GmailApp.search("to:" + emailAddress + " subject:" + personalizedSubject);
+      if (threads.length > 0) {
+        threads[0].addLabel(label);
+        Logger.log("Label '" + draftName + "' applied to sent email.");
+      }
+      
+      // Mark the email as sent in the spreadsheet
+      sheet.getRange(startRow + j, 6).setValue("Sent");  // Mark "Sent" in Column F
+    } catch (e) {
+      Logger.log("Error sending email to: " + emailAddress + " - " + e.message);
+    }
+  }
+
+  // Wait for 20 seconds before checking for bounced emails
+  Utilities.sleep(20000); // 20 seconds
+
+  // Check for bounced emails
+  Logger.log("Checking for bounced emails...");
+  var bounceThreads = GmailApp.search('from:mailer-daemon@googlemail.com after:' + Math.floor((new Date().getTime() - 5 * 60 * 1000) / 1000));
+  Logger.log("Bounce threads found: " + bounceThreads.length);
+
+  // Loop through each email in the spreadsheet to check for bounce-backs
+  for (var i = 0; i < data.length; i++) {
+    var emailAddress = data[i][0];  // Column A: Email Address
+
+    // Check if the email has a bounce-back thread
+    var bounced = false;
+    for (var j = 0; j < bounceThreads.length; j++) {
+      var thread = bounceThreads[j];
+      var messages = thread.getMessages();
+      
+      // Loop through messages in the thread
+      for (var k = 0; k < messages.length; k++) {
+        var message = messages[k];
+        
+        // Add a check to make sure the getTo() method exists
+        if (message.getTo) {
+          // If the recipient's email is in the bounce message, mark it as bounced
+          if (message.getTo().includes(emailAddress)) {
+            bounced = true;
+            Logger.log("Bounced email found for: " + emailAddress);
+            break;
+          }
+        }
+      }
+      
+      if (bounced) {
+        break;
+      }
+    }
+    
+    // If a bounce is detected, mark it in column G
+    if (bounced) {
+      sheet.getRange(startRow + i, 7).setValue("Yes");  // Mark "Bounced" in Column G
+    }
+  }
+
+  Logger.log("Bounce check completed.");
+  
+  // Format headers for Sent and Bounced columns
+  sheet.getRange(1, 6).setValue("Sent");
+  sheet.getRange(1, 7).setValue("Bounced");
+
+  // Formatting the header for Sent and Bounced columns: bold, center-aligned, yellow fill, and borders all sides
+  var headers = sheet.getRange(1, 6, 1, 2);  // F1:G1
+  headers.setFontWeight("bold")
+         .setHorizontalAlignment("center")
+         .setBackground("#FFFF00")
+         .setBorder(true, true, true, true, null, null);
+
+}
