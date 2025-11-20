@@ -1,0 +1,207 @@
+function _createMailsHistorySheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var InputsSheet = ss.getSheetByName("Inputs");
+  var MailsHistorySheet = ss.getSheetByName("Mails History");
+
+  // Delete the existing Mails History sheet if it exists
+  if (MailsHistorySheet) {
+    ss.deleteSheet(MailsHistorySheet);
+  }
+
+  // Create a new Mails History sheet
+  MailsHistorySheet = ss.insertSheet("Mails History");
+
+  // Get the last row of the Inputs sheet
+  var lastRow = InputsSheet.getLastRow();
+
+  // Set column headings
+  MailsHistorySheet.getRange("A1").setValue("Email Address");
+  MailsHistorySheet.getRange("B1").setValue("Last Mail Check");
+  MailsHistorySheet.getRange("C1").setValue("Date");
+  MailsHistorySheet.getRange("D1").setValue("Time");
+  MailsHistorySheet.getRange("E1").setValue("No. of Mails Sent");
+  MailsHistorySheet.getRange("F1").setValue("Last Mail Label");
+  MailsHistorySheet.getRange("G1").setValue("Current POC");
+
+  // Formatting the header row: bold, yellow fill, center-aligned
+  var headerRange = MailsHistorySheet.getRange(1, 1, 1, 7);
+  headerRange.setFontWeight("bold")
+    .setBackground("yellow")
+    .setHorizontalAlignment("center");
+
+  // Apply formulas for Email Address in column A
+  for (var row = 2; row <= lastRow; row++) {
+    MailsHistorySheet.getRange(row, 1).setFormula('=TRIM(Inputs!A' + row + ')');
+  }
+
+  // Populate "Current POC" from Inputs sheet (column E)
+  var data = InputsSheet.getRange(2, 5, lastRow - 1).getValues(); // Column E is the current POC in Inputs sheet
+  MailsHistorySheet.getRange(2, 7, lastRow - 1, 1).setValues(data);
+
+  // Fetch mail data for each email and populate columns B to F
+  for (var row = 2; row <= lastRow; row++) {
+    var email = MailsHistorySheet.getRange(row, 1).getValue();
+    var threads = GmailApp.search('to:' + email);
+    if (threads.length > 0) {
+      var latestThread = threads[0];
+      var latestMessage = latestThread.getMessages().pop();
+      
+      // Date and Time of last mail
+      var date = latestMessage.getDate();
+      MailsHistorySheet.getRange(row, 3).setValue(Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd"));
+      MailsHistorySheet.getRange(row, 4).setValue(Utilities.formatDate(date, Session.getScriptTimeZone(), "HH:mm:ss"));
+      
+      // Number of mails sent
+      MailsHistorySheet.getRange(row, 5).setValue(threads.length);
+
+      // Last mail label
+      var labels = latestThread.getLabels();
+      var labelNames = labels.map(function(label) {
+        return label.getName();
+      }).join(", ");
+      MailsHistorySheet.getRange(row, 6).setValue(labelNames);
+
+      // Mark mail as checked
+      MailsHistorySheet.getRange(row, 2).setValue("Mail sent");
+
+    } else {
+      MailsHistorySheet.getRange(row, 2).setValue("Mail not sent");
+    }
+  }
+
+  // Apply conditional formatting for 'Mail not sent' and highlight email addresses (Column A)
+  var emailRange = MailsHistorySheet.getRange(2, 1, lastRow - 1, 1); // Only the Email Address column
+  var statusRange = MailsHistorySheet.getRange(2, 2, lastRow - 1, 1); // Last Mail Check column
+  var rule = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=$B2="Mail sent"') // Apply if "Mail not sent" in column B
+    .setBackground("red")
+    .setRanges([emailRange])
+    .build();
+  
+  var rules = MailsHistorySheet.getConditionalFormatRules();
+  rules.push(rule);
+  MailsHistorySheet.setConditionalFormatRules(rules);
+
+  // Apply borders to the data range
+  var dataRange = MailsHistorySheet.getRange(1, 1, lastRow, 7);
+  dataRange.setBorder(true, true, true, true, true, true);
+
+  // Apply filters to the header row
+  MailsHistorySheet.getRange(1, 1, 1, 7).createFilter();
+
+  // Align "Email Address" to the left, and the rest (B to G) center-aligned
+  MailsHistorySheet.getRange(2, 1, lastRow - 1, 1).setHorizontalAlignment("left");
+  MailsHistorySheet.getRange(2, 2, lastRow - 1, 6).setHorizontalAlignment("center");
+
+  // Delay for 5 seconds before auto-fitting columns to ensure all data is populated
+  Utilities.sleep(5000);
+  MailsHistorySheet.autoResizeColumns(1, 7);
+
+  // Log execution completion with detailed information
+  Logger.log("Mails History sheet created. Total emails processed: " + (lastRow - 1));
+}
+
+
+
+
+function _createMailsDataSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var MailsDataSheet = ss.getSheetByName("Mails Data");
+
+  // Delete the existing MailsData sheet if it exists
+  if (MailsDataSheet) {
+    ss.deleteSheet(MailsDataSheet);
+  }
+
+  // Create a new Mails Data sheet
+  MailsDataSheet = ss.insertSheet("Mails Data");
+
+  // Set column headings
+  MailsDataSheet.getRange("A1").setValue("Email Address");
+  MailsDataSheet.getRange("B1").setValue("Name");
+  MailsDataSheet.getRange("C1").setValue("Sir/Ma'am/Team");
+  MailsDataSheet.getRange("D1").setValue("Subject");
+  MailsDataSheet.getRange("E1").setValue("POC");
+
+  // Formatting the header row: bold, yellow fill, center-aligned, font Calibri, size 11
+  var headerRange = MailsDataSheet.getRange(1, 1, 1, 5);
+  headerRange.setFontWeight("bold")
+    .setBackground("yellow")
+    .setHorizontalAlignment("center")
+    .setFontFamily("Calibri")
+    .setFontSize(11);
+
+  // Set formulas in respective columns starting from row 2
+  var lastRow = ss.getSheetByName("Inputs").getLastRow(); // Get the last row of Inputs sheet
+  MailsDataSheet.getRange(2, 1, lastRow - 1, 1).setFormula("=TRIM(Inputs!A2)"); // Column A: Email Address
+  MailsDataSheet.getRange(2, 2, lastRow - 1, 1).setFormula("=PROPER(TRIM(Inputs!B2))"); // Column B: Name
+  MailsDataSheet.getRange(2, 3, lastRow - 1, 1).setFormula("=TRIM(Inputs!C2)"); // Column C: Sir/Ma'am/Team
+  MailsDataSheet.getRange(2, 4, lastRow - 1, 1).setFormula("=CONCATENATE(Trim(Inputs!D2), \" | \", \"Campus Recruitment Invitation - Department of Business Economics, University of Delhi\")"); // Column D: Subject
+  MailsDataSheet.getRange(2, 5, lastRow - 1, 1).setFormula("=TRIM(Inputs!E2)"); // Column E: POC
+
+  // Wait for the formulas to calculate and populate data (use a short pause if necessary)
+  SpreadsheetApp.flush();
+
+  // Auto resize columns to fit the content
+  MailsDataSheet.autoResizeColumns(1, 5);
+
+  // Set font Calibri and size 11 for the entire sheet
+  MailsDataSheet.getRange(2, 1, lastRow - 1, 5).setFontFamily("Calibri").setFontSize(11);
+
+  // Apply conditional formatting to Column C: Cells that don't match "Sir", "Ma'am", or "Team"
+  var rule1 = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=AND(C2<>"Sir", C2<>"Ma\'am", C2<>"Team")')
+    .setBackground("#FF0000")  // Red background
+    .setRanges([MailsDataSheet.getRange(2, 3, lastRow - 1, 1)])  // Apply to Column C
+    .build();
+
+  // Apply conditional formatting to Column A: Highlight duplicates
+  var rule2 = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=COUNTIF(A:A, A2)>1')
+    .setBackground("#FF0000")  // Red background
+    .setRanges([MailsDataSheet.getRange(2, 1, lastRow - 1, 1)])  // Apply to Column A
+    .build();
+
+  // Apply conditional formatting to Column E: Highlight empty POC cells using the built-in "is empty" criteria
+  var rule3 = SpreadsheetApp.newConditionalFormatRule()
+    .whenCellEmpty()
+    .setBackground("#FF0000")  // Red background for empty cells
+    .setRanges([MailsDataSheet.getRange(2, 5, lastRow - 1, 1)])  // Apply to Column E (POC)
+    .build();
+
+  // Apply all rules
+  var rules = MailsDataSheet.getConditionalFormatRules();
+  rules.push(rule1);
+  rules.push(rule2);
+  rules.push(rule3);
+  MailsDataSheet.setConditionalFormatRules(rules);
+
+  // Log execution completion
+  Logger.log("Mails Data sheet created with the required column headings, formulas, and conditional formatting applied.");
+}
+
+
+
+function _changeFontForAllSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = ss.getSheets();
+  
+  // Loop through each sheet
+  sheets.forEach(function(sheet) {
+    var lastRow = sheet.getLastRow();
+    var lastColumn = sheet.getLastColumn();
+    
+    // Apply Calibri font and size 11 to the entire sheet
+    sheet.getRange(1, 1, lastRow, lastColumn).setFontFamily("Calibri").setFontSize(11);
+  });
+
+  // Log completion
+  Logger.log("Font changed to Calibri, size 11 for all sheets.");
+}
+
+
+function Step1_Mails_History_Data() {
+  _createMailsHistorySheet();
+  _createMailsDataSheet();
+  _changeFontForAllSheets();
+}
